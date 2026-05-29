@@ -6,14 +6,14 @@ import matplotlib.pyplot as plt
 import tsplib95
 
 # Settings
-SEED = 442
-random.seed(SEED)
-np.random.seed(SEED)
-ITERATIONS = 25000
+SEED = 55
+ITERATIONS = 5000
 RUNS = 10
 DATASETS = [
     "berlin52",
-    "kroA100"]
+    "kroA100",
+    "pla33810",
+    "d15112"]
 
 
 
@@ -46,9 +46,8 @@ def random_route(cities):
     return route
 
 
-# Swap two cities
+# Swap two nodes
 def swap(route):
-
     new_route = route[:]
     i, j = random.sample(range(len(route)), 2)
     new_route[i], new_route[j] = new_route[j], new_route[i]
@@ -57,16 +56,14 @@ def swap(route):
 
 # Reverse segment
 def inversion(route):
-
     new_route = route[:]
     i, j = sorted(random.sample(range(len(route)), 2))
     new_route[i:j] = reversed(new_route[i:j])
     return new_route
 
 
-# Remove and reinsert city
+# Remove and reinsert node
 def insertion(route):
-
     new_route = route[:]
     i, j = random.sample(range(len(route)), 2)
     city = new_route.pop(i)
@@ -76,7 +73,6 @@ def insertion(route):
 
 # Segment shuffle
 def segment_shuffle(route):
-
     new_route = route[:]
     i, j = sorted(random.sample(range(len(route)), 2))
     segment = new_route[i:j]
@@ -188,8 +184,8 @@ def random_gradient(cities, distance_matrix, iterations=25000):
 
         # No improvement: switch heuristic
         else:
-
-            heuristic_name, heuristic = random.choice(heuristics)
+            other_heuristics = [(n, h) for n, h in heuristics if n != heuristic_name]
+            heuristic_name, heuristic = random.choice(other_heuristics)
 
         if current_cost < best_cost:
 
@@ -221,6 +217,9 @@ for dataset_name in DATASETS:
     for run in range(RUNS):
 
         print(f"Run {run + 1}/{RUNS}")
+
+        random.seed(SEED + run)
+        np.random.seed(SEED + run)
 
         random_result = random_hyperheuristic(
             cities,
@@ -257,14 +256,17 @@ for dataset_name in DATASETS:
         "rg_std": np.std(rg_costs),
         "rg_best": np.min(rg_costs)})
 
+    best_random_result = min(random_results, key=lambda r: r["best_cost"])
+    best_rg_result = min(rg_results, key=lambda r: r["best_cost"])
+
     plt.figure(figsize=(10, 5))
 
     plt.plot(
-        random_results[0]["history"],
+        best_random_result["history"],
         label="Random HH")
 
     plt.plot(
-        rg_results[0]["history"],
+        best_rg_result["history"],
         label="RandomGradient HH")
 
     plt.xlabel("Iteration")
@@ -272,9 +274,10 @@ for dataset_name in DATASETS:
     plt.title(f"{dataset_name}")
     plt.legend()
     plt.grid(True)
-    plt.show()
+    plt.savefig(f"{dataset_name}_convergence.png", dpi=150, bbox_inches="tight")
+    plt.close()
 
-    stats = rg_results[0]["heuristic_stats"]
+    stats = best_rg_result["heuristic_stats"]
 
     for heuristic_name, values in stats.items():
 
