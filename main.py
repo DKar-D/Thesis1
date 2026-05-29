@@ -6,14 +6,12 @@ import matplotlib.pyplot as plt
 import tsplib95
 
 # Settings
-SEED = 55
-ITERATIONS = 5000
+SEED = 42
+ITERATIONS = 25000
 RUNS = 10
 DATASETS = [
     "berlin52",
-    "kroA100",
-    "pla33810",
-    "d15112"]
+    "kroA100"]
 
 
 
@@ -98,10 +96,12 @@ def initialize_stats():
         for name, _ in heuristics}
 
 
-def random_hyperheuristic(cities, distance_matrix, iterations=25000):
+def random_hyperheuristic(initial_solution, objective_fn, heuristics, iterations=25000):
+    # objective_fn(solution) -> float, always minimised.
+    # For maximisation problems (e.g. knapsack), pass a negated objective.
 
-    current = random_route(cities)
-    current_cost = route_distance(current, distance_matrix)
+    current = initial_solution[:]
+    current_cost = objective_fn(current)
     best = current[:]
     best_cost = current_cost
     history = [best_cost]
@@ -115,7 +115,7 @@ def random_hyperheuristic(cities, distance_matrix, iterations=25000):
         heuristic_history.append(heuristic_name)
         heuristic_stats[heuristic_name]["used"] += 1
         candidate = heuristic(current)
-        candidate_cost = route_distance(candidate, distance_matrix)
+        candidate_cost = objective_fn(candidate)
 
         # Accept only improving solutions
         if candidate_cost < current_cost:
@@ -140,7 +140,7 @@ def random_hyperheuristic(cities, distance_matrix, iterations=25000):
 
     runtime = time.time() - start_time
 
-    return {"best_route": best,            
+    return {"best_solution": best,
             "best_cost": best_cost,
             "history": history,
             "heuristic_stats": heuristic_stats,
@@ -149,10 +149,12 @@ def random_hyperheuristic(cities, distance_matrix, iterations=25000):
 
 
 
-def random_gradient(cities, distance_matrix, iterations=25000):
+def random_gradient(initial_solution, objective_fn, heuristics, iterations=25000):
+    # objective_fn(solution) is always minimised.
+    # For maximisation problems like knapsack, pass a negated objective.
 
-    current = random_route(cities)
-    current_cost = route_distance(current, distance_matrix)
+    current = initial_solution[:]
+    current_cost = objective_fn(current)
 
     best = current[:]
     best_cost = current_cost
@@ -168,7 +170,7 @@ def random_gradient(cities, distance_matrix, iterations=25000):
         heuristic_history.append(heuristic_name)
         heuristic_stats[heuristic_name]["used"] += 1
         candidate = heuristic(current)
-        candidate_cost = route_distance(candidate, distance_matrix)
+        candidate_cost = objective_fn(candidate)
 
         # Improvement found: keep heuristic
         if candidate_cost < current_cost:
@@ -196,7 +198,7 @@ def random_gradient(cities, distance_matrix, iterations=25000):
 
     runtime = time.time() - start_time
 
-    return {"best_route": best,
+    return {"best_solution": best,
             "best_cost": best_cost,
             "history": history,
             "heuristic_stats": heuristic_stats,
@@ -211,6 +213,10 @@ for dataset_name in DATASETS:
     print(f"Dataset: {dataset_name}")
     problem, cities, distance_matrix = load_problem(dataset_name)
 
+    # TSP objective: minimise total route distance
+    def tsp_objective(route):
+        return route_distance(route, distance_matrix)
+
     random_results = []
     rg_results = []
 
@@ -221,14 +227,21 @@ for dataset_name in DATASETS:
         random.seed(SEED + run)
         np.random.seed(SEED + run)
 
+        initial = random_route(cities)
+
         random_result = random_hyperheuristic(
-            cities,
-            distance_matrix,
+            initial,
+            tsp_objective,
+            heuristics,
             ITERATIONS)
 
+        random.seed(SEED + run)
+        np.random.seed(SEED + run)
+
         rg_result = random_gradient(
-            cities,
-            distance_matrix,
+            initial,
+            tsp_objective,
+            heuristics,
             ITERATIONS)
 
         random_results.append(random_result)
