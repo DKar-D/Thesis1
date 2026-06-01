@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import tsplib95
 
 # Settings
-SEED = 42
+SEED = 13
 ITERATIONS = 25000
 RUNS = 10
 DATASETS = [
@@ -51,15 +51,6 @@ def swap(route):
     new_route[i], new_route[j] = new_route[j], new_route[i]
     return new_route
 
-
-# Reverse segment
-def inversion(route):
-    new_route = route[:]
-    i, j = sorted(random.sample(range(len(route)), 2))
-    new_route[i:j] = reversed(new_route[i:j])
-    return new_route
-
-
 # Remove and reinsert node
 def insertion(route):
     new_route = route[:]
@@ -67,7 +58,6 @@ def insertion(route):
     city = new_route.pop(i)
     new_route.insert(j, city)
     return new_route
-
 
 # Segment shuffle
 def segment_shuffle(route):
@@ -78,12 +68,49 @@ def segment_shuffle(route):
     new_route[i:j] = segment
     return new_route
 
+def two_opt(route):
+    new_route = route[:]
+    i, j = sorted(random.sample(range(len(route)), 2))
+    if j - i < 2:
+        return new_route
+    new_route[i:j] = reversed(new_route[i:j])
+    return new_route
 
-heuristics = [
+def adjacent_swap(route):
+    new_route = route[:]
+    i = random.randint(0, len(route)-2)
+    new_route[i], new_route[i+1] = (new_route[i+1], new_route[i])
+    return new_route
+
+# Defeats the purpose of Random Gradient
+def two_opt_local_search(route):
+    best_route = route[:]
+    best_distance = route_distance(best_route)
+    improved = True
+
+    while improved:
+        improved = False
+        for i in range(len(route) - 1):
+            for j in range(i + 2, len(route)):
+
+                candidate = best_route[:]
+                candidate[i:j] = reversed(candidate[i:j])
+                candidate_distance = route_distance(candidate)
+
+                if candidate_distance < best_distance:
+                    best_route = candidate
+                    best_distance = candidate_distance
+                    improved = True
+
+        route = best_route
+    return best_route
+
+tsp_heuristics = [
     ("swap", swap),
-    ("inversion", inversion),
     ("insertion", insertion),
-    ("segment_shuffle", segment_shuffle),]
+    ("segment_shuffle", segment_shuffle),
+    ("adjacent swap", adjacent_swap),
+    ("two opt", two_opt),]
 
 
 # For keeping track of which heuristics were used
@@ -93,7 +120,7 @@ def initialize_stats():
             "improvements": 0,
             "total_gain": 0,
             "best_single_gain": 0}
-        for name, _ in heuristics}
+        for name, _ in tsp_heuristics}
 
 
 def random_hyperheuristic(initial_solution, objective_fn, heuristics, iterations=25000):
@@ -151,7 +178,7 @@ def random_hyperheuristic(initial_solution, objective_fn, heuristics, iterations
 
 def random_gradient(initial_solution, objective_fn, heuristics, iterations=25000):
     # objective_fn(solution) is always minimised.
-    # For maximisation problems like knapsack, pass a negated objective.
+    # For maximisation problems like knapsack, we should oprimise for a negative value.
 
     current = initial_solution[:]
     current_cost = objective_fn(current)
@@ -206,6 +233,326 @@ def random_gradient(initial_solution, objective_fn, heuristics, iterations=25000
             "runtime": runtime}
 
 
+def random_permutation(initial_solution, objective_fn, heuristics, iterations=25000):
+    # At each step, applies heuristics in a freshly shuffled order (one per iteration).
+    # A new permutation is generated each time the previous one is exhausted.
+
+    current = initial_solution[:]
+    current_cost = objective_fn(current)
+    best = current[:]
+    best_cost = current_cost
+    history = [best_cost]
+    heuristic_stats = initialize_stats()
+    heuristic_history = []
+    start_time = time.time()
+
+    permutation = list(heuristics)
+    random.shuffle(permutation)
+    perm_index = 0
+
+    for _ in range(iterations):
+
+        if perm_index >= len(permutation):
+            random.shuffle(permutation)
+            perm_index = 0
+
+        heuristic_name, heuristic = permutation[perm_index]
+        perm_index += 1
+
+        heuristic_history.append(heuristic_name)
+        heuristic_stats[heuristic_name]["used"] += 1
+        candidate = heuristic(current)
+        candidate_cost = objective_fn(candidate)
+
+        # Accept only improving solutions
+        if candidate_cost < current_cost:
+
+            gain = current_cost - candidate_cost
+            current = candidate
+            current_cost = candidate_cost
+            heuristic_stats[heuristic_name]["improvements"] += 1
+            heuristic_stats[heuristic_name]["total_gain"] += gain
+
+            if gain > heuristic_stats[heuristic_name]["best_single_gain"]:
+                heuristic_stats[heuristic_name]["best_single_gain"] = gain
+
+        if current_cost < best_cost:
+            best = current[:]
+            best_cost = current_cost
+
+        history.append(best_cost)
+
+    runtime = time.time() - start_time
+
+    return {"best_solution": best,
+            "best_cost": best_cost,
+            "history": history,
+            "heuristic_stats": heuristic_stats,
+            "heuristic_history": heuristic_history,
+            "runtime": runtime}
+
+
+def permutation_gradient(initial_solution, objective_fn, heuristics, iterations=25000):
+    # Follows a shuffled permutation order, but keeps applying the current heuristic
+    # as long as it keeps improving. Only advances in the permutation on failure.
+    # A new permutation is generated once the current one is exhausted.
+
+    current = initial_solution[:]
+    current_cost = objective_fn(current)
+    best = current[:]
+    best_cost = current_cost
+    history = [best_cost]
+    heuristic_stats = initialize_stats()
+    heuristic_history = []
+    start_time = time.time()
+
+    permutation = list(heuristics)
+    random.shuffle(permutation)
+    perm_index = 0
+    heuristic_name, heuristic = permutation[perm_index]
+
+    for _ in range(iterations):
+
+        heuristic_history.append(heuristic_name)
+        heuristic_stats[heuristic_name]["used"] += 1
+        candidate = heuristic(current)
+        candidate_cost = objective_fn(candidate)
+
+        # Improvement found: stay with this heuristic
+        if candidate_cost < current_cost:
+
+            gain = current_cost - candidate_cost
+            current = candidate
+            current_cost = candidate_cost
+            heuristic_stats[heuristic_name]["improvements"] += 1
+            heuristic_stats[heuristic_name]["total_gain"] += gain
+
+            if gain > heuristic_stats[heuristic_name]["best_single_gain"]:
+                heuristic_stats[heuristic_name]["best_single_gain"] = gain
+
+        # No improvement: advance to next in permutation
+        else:
+
+            perm_index += 1
+            if perm_index >= len(permutation):
+                random.shuffle(permutation)
+                perm_index = 0
+
+            heuristic_name, heuristic = permutation[perm_index]
+
+        if current_cost < best_cost:
+            best = current[:]
+            best_cost = current_cost
+
+        history.append(best_cost)
+
+    runtime = time.time() - start_time
+
+    return {"best_solution": best,
+            "best_cost": best_cost,
+            "history": history,
+            "heuristic_stats": heuristic_stats,
+            "heuristic_history": heuristic_history,
+            "runtime": runtime}
+
+
+def greedy(initial_solution, objective_fn, heuristics, iterations=25000):
+    # Each iteration applies all heuristics to the current solution and accepts the one with the best.
+    current = initial_solution[:]
+    current_cost = objective_fn(current)
+    best = current[:]
+    best_cost = current_cost
+    history = [best_cost]
+    heuristic_stats = initialize_stats()
+    heuristic_history = []
+    start_time = time.time()
+    iteration = 0
+
+    while iteration < iterations:
+
+        best_candidate = None
+        best_candidate_cost = current_cost
+        best_candidate_name = None
+
+        for heuristic_name, heuristic in heuristics:
+
+            if iteration >= iterations:
+                break
+
+            heuristic_stats[heuristic_name]["used"] += 1
+            heuristic_history.append(heuristic_name)
+            candidate = heuristic(current)
+            candidate_cost = objective_fn(candidate)
+            iteration += 1
+
+            if candidate_cost < best_candidate_cost:
+                best_candidate = candidate
+                best_candidate_cost = candidate_cost
+                best_candidate_name = heuristic_name
+
+        # Accept the best candidate from this round if it improves
+        if best_candidate is not None:
+
+            gain = current_cost - best_candidate_cost
+            current = best_candidate
+            current_cost = best_candidate_cost
+            heuristic_stats[best_candidate_name]["improvements"] += 1
+            heuristic_stats[best_candidate_name]["total_gain"] += gain
+
+            if gain > heuristic_stats[best_candidate_name]["best_single_gain"]:
+                heuristic_stats[best_candidate_name]["best_single_gain"] = gain
+
+        if current_cost < best_cost:
+            best = current[:]
+            best_cost = current_cost
+
+        history.append(best_cost)
+
+    runtime = time.time() - start_time
+
+    return {"best_solution": best,
+            "best_cost": best_cost,
+            "history": history,
+            "heuristic_stats": heuristic_stats,
+            "heuristic_history": heuristic_history,
+            "runtime": runtime}
+
+
+def greedy_gradient(initial_solution, objective_fn, heuristics, iterations=25000):
+    # Runs a greedy round to find the best heuristic, then keeps applying it
+    # as long as it improves. When a full greedy round finds no improvement,
+    # a new greedy round is run to pick the next best heuristic.
+
+    current = initial_solution[:]
+    current_cost = objective_fn(current)
+    best = current[:]
+    best_cost = current_cost
+    history = [best_cost]
+    heuristic_stats = initialize_stats()
+    heuristic_history = []
+    start_time = time.time()
+    iteration = 0
+
+    def greedy_round():
+        # Tries all heuristics once, returns the name/fn with the best gain (or None).
+        best_candidate = None
+        best_candidate_cost = current_cost
+        best_fn = None
+        best_name = None
+
+        for heuristic_name, heuristic in heuristics:
+            heuristic_stats[heuristic_name]["used"] += 1
+            heuristic_history.append(heuristic_name)
+            candidate = heuristic(current)
+            candidate_cost = objective_fn(candidate)
+
+            if candidate_cost < best_candidate_cost:
+                best_candidate = candidate
+                best_candidate_cost = candidate_cost
+                best_fn = heuristic
+                best_name = heuristic_name
+
+        return best_name, best_fn, best_candidate, best_candidate_cost
+
+    # Initial greedy round to pick the starting heuristic
+    iteration += len(heuristics)
+    heuristic_name, heuristic, first_candidate, first_cost = greedy_round()
+    history.append(best_cost)
+
+    # Accept the initial greedy winner if it improved
+    if heuristic is not None:
+
+        gain = current_cost - first_cost
+        current = first_candidate
+        current_cost = first_cost
+        heuristic_stats[heuristic_name]["improvements"] += 1
+        heuristic_stats[heuristic_name]["total_gain"] += gain
+
+        if gain > heuristic_stats[heuristic_name]["best_single_gain"]:
+            heuristic_stats[heuristic_name]["best_single_gain"] = gain
+
+        if current_cost < best_cost:
+            best = current[:]
+            best_cost = current_cost
+
+    while iteration < iterations:
+
+        if heuristic is None:
+            # No heuristic improved last round — run a new greedy round
+            iteration += len(heuristics)
+            heuristic_name, heuristic, candidate, candidate_cost = greedy_round()
+            history.append(best_cost)
+
+            if heuristic is not None:
+                gain = current_cost - candidate_cost
+                current = candidate
+                current_cost = candidate_cost
+                heuristic_stats[heuristic_name]["improvements"] += 1
+                heuristic_stats[heuristic_name]["total_gain"] += gain
+
+                if gain > heuristic_stats[heuristic_name]["best_single_gain"]:
+                    heuristic_stats[heuristic_name]["best_single_gain"] = gain
+
+                if current_cost < best_cost:
+                    best = current[:]
+                    best_cost = current_cost
+
+            continue
+
+        # Keep applying the winning heuristic
+        heuristic_history.append(heuristic_name)
+        heuristic_stats[heuristic_name]["used"] += 1
+        candidate = heuristic(current)
+        candidate_cost = objective_fn(candidate)
+        iteration += 1
+
+        if candidate_cost < current_cost:
+
+            gain = current_cost - candidate_cost
+            current = candidate
+            current_cost = candidate_cost
+            heuristic_stats[heuristic_name]["improvements"] += 1
+            heuristic_stats[heuristic_name]["total_gain"] += gain
+
+            if gain > heuristic_stats[heuristic_name]["best_single_gain"]:
+                heuristic_stats[heuristic_name]["best_single_gain"] = gain
+
+            if current_cost < best_cost:
+                best = current[:]
+                best_cost = current_cost
+
+        else:
+            # Current heuristic failed — run a new greedy round to re-select
+            iteration += len(heuristics)
+            heuristic_name, heuristic, candidate, candidate_cost = greedy_round()
+            history.append(best_cost)
+
+            if heuristic is not None:
+                gain = current_cost - candidate_cost
+                current = candidate
+                current_cost = candidate_cost
+                heuristic_stats[heuristic_name]["improvements"] += 1
+                heuristic_stats[heuristic_name]["total_gain"] += gain
+
+                if gain > heuristic_stats[heuristic_name]["best_single_gain"]:
+                    heuristic_stats[heuristic_name]["best_single_gain"] = gain
+
+                if current_cost < best_cost:
+                    best = current[:]
+                    best_cost = current_cost
+
+        history.append(best_cost)
+
+    runtime = time.time() - start_time
+
+    return {"best_solution": best,
+            "best_cost": best_cost,
+            "history": history,
+            "heuristic_stats": heuristic_stats,
+            "heuristic_history": heuristic_history,
+            "runtime": runtime}
+
+
 all_results = []
 
 for dataset_name in DATASETS:
@@ -217,8 +564,16 @@ for dataset_name in DATASETS:
     def tsp_objective(route):
         return route_distance(route, distance_matrix)
 
-    random_results = []
-    rg_results = []
+    algorithms = [
+        ("Random HH",            random_hyperheuristic),
+        ("RandomGradient HH",    random_gradient),
+        ("RandomPermutation HH", random_permutation),
+        ("PermutationGradient HH", permutation_gradient),
+        ("Greedy HH",            greedy),
+        ("GreedyGradient HH",    greedy_gradient),
+    ]
+
+    all_run_results = {label: [] for label, _ in algorithms}
 
     for run in range(RUNS):
 
@@ -226,85 +581,64 @@ for dataset_name in DATASETS:
 
         random.seed(SEED + run)
         np.random.seed(SEED + run)
-
         initial = random_route(cities)
 
-        random_result = random_hyperheuristic(
-            initial,
-            tsp_objective,
-            heuristics,
-            ITERATIONS)
+        for label, runner in algorithms:
+            random.seed(SEED + run)
+            np.random.seed(SEED + run)
+            result = runner(initial, tsp_objective, tsp_heuristics, ITERATIONS)
+            all_run_results[label].append(result)
 
-        random.seed(SEED + run)
-        np.random.seed(SEED + run)
+    # --- Print summary stats for each algorithm ---
+    dataset_row = {"dataset": dataset_name}
 
-        rg_result = random_gradient(
-            initial,
-            tsp_objective,
-            heuristics,
-            ITERATIONS)
+    for label, _ in algorithms:
+        costs = [r["best_cost"] for r in all_run_results[label]]
+        slug = label.lower().replace(" ", "_")
 
-        random_results.append(random_result)
-        rg_results.append(rg_result)
+        print(f"\n{label}")
+        print("Average:", np.mean(costs))
+        print("Std:    ", np.std(costs))
+        print("Best:   ", np.min(costs))
 
-    random_costs = [r["best_cost"] for r in random_results]
-    rg_costs = [r["best_cost"] for r in rg_results]
+        dataset_row[f"{slug}_avg"]  = np.mean(costs)
+        dataset_row[f"{slug}_std"]  = np.std(costs)
+        dataset_row[f"{slug}_best"] = np.min(costs)
 
-    print("\nRandom HH")
-    print("Average:", np.mean(random_costs))
-    print("Std:", np.std(random_costs))
-    print("Best:", np.min(random_costs))
+    all_results.append(dataset_row)
 
-    print("\nRandomGradient HH")
-    print("Average:", np.mean(rg_costs))
-    print("Std:", np.std(rg_costs))
-    print("Best:", np.min(rg_costs))
+    plt.figure(figsize=(12, 6))
 
-    all_results.append({
-        "dataset": dataset_name,
-        "random_avg": np.mean(random_costs),
-        "random_std": np.std(random_costs),
-        "random_best": np.min(random_costs),
-        "rg_avg": np.mean(rg_costs),
-        "rg_std": np.std(rg_costs),
-        "rg_best": np.min(rg_costs)})
-
-    best_random_result = min(random_results, key=lambda r: r["best_cost"])
-    best_rg_result = min(rg_results, key=lambda r: r["best_cost"])
-
-    plt.figure(figsize=(10, 5))
-
-    plt.plot(
-        best_random_result["history"],
-        label="Random HH")
-
-    plt.plot(
-        best_rg_result["history"],
-        label="RandomGradient HH")
+    for label, _ in algorithms:
+        best_result = min(all_run_results[label], key=lambda r: r["best_cost"])
+        plt.plot(best_result["history"], label=label)
 
     plt.xlabel("Iteration")
     plt.ylabel("Best Distance")
-    plt.title(f"{dataset_name}")
+    plt.title(f"{dataset_name} — Convergence (best run per algorithm)")
     plt.legend()
     plt.grid(True)
+    plt.tight_layout()
     plt.savefig(f"{dataset_name}_convergence.png", dpi=150, bbox_inches="tight")
     plt.close()
 
-    stats = best_rg_result["heuristic_stats"]
+    for label, _ in algorithms:
 
-    for heuristic_name, values in stats.items():
+        best_result = min(all_run_results[label], key=lambda r: r["best_cost"])
+        stats = best_result["heuristic_stats"]
+        print(f"\n--- {label} heuristic stats (best run) ---")
 
-        used = values["used"]
-        improvements = values["improvements"]
-        acceptance_rate = (improvements / used if used > 0 else 0)
+        for heuristic_name, values in stats.items():
 
-        print(f"\n{heuristic_name}")
-
-        print("Used:", used)
-        print("Improvements:", improvements)
-        print("Acceptance rate:", round(acceptance_rate, 4))
-        print("Total gain:", round(values["total_gain"], 2))
-        print("Best single gain:", round(values["best_single_gain"], 2))
+            used = values["used"]
+            improvements = values["improvements"]
+            acceptance_rate = improvements / used if used > 0 else 0
+            print(f"\n  {heuristic_name}")
+            print("Used:", used)
+            print("Improvements:", improvements)
+            print("Acceptance rate:", round(acceptance_rate, 4))
+            print("Total gain:", round(values["total_gain"], 2))
+            print("Best single gain:", round(values["best_single_gain"], 2))
 
 results_df = pd.DataFrame(all_results)
 results_df.to_csv("results_summary.csv", index=False)
