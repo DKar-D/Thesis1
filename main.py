@@ -93,36 +93,6 @@ def two_opt(route):
     new_route[i:j] = list(reversed(new_route[i:j]))
     return new_route
 
-# def adjacent_swap(route):
-#     new_route = route[:]
-#     i = random.randint(0, len(route)-1)
-#     next_i = (i + 1) % len(route)
-#     new_route[i], new_route[next_i] = (new_route[next_i], new_route[i])
-#     return new_route
-
-# Not sure if this is acceptable. Has basically built in Random Gradient
-# def two_opt_local_search(route):
-#     best_route = route[:]
-#     best_distance = route_distance(best_route)
-#     improved = True
-
-#     while improved:
-#         improved = False
-#         for i in range(len(route) - 1):
-#             for j in range(i + 2, len(route)):
-
-#                 candidate = best_route[:]
-#                 candidate[i:j] = reversed(candidate[i:j])
-#                 candidate_distance = route_distance(candidate)
-
-#                 if candidate_distance < best_distance:
-#                     best_route = candidate
-#                     best_distance = candidate_distance
-#                     improved = True
-
-#         route = best_route
-#     return best_route
-
 tsp_heuristics = [
     ("swap", swap),
     ("insertion", insertion),
