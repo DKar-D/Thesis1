@@ -14,7 +14,6 @@ DATASETS = [
     "kroA100"]
 
 
-
 # Loads tsplib datasets. Will probably be deprecated later
 def load_problem(name):
     problem = tsplib95.load(f"datasets/{name}.tsp")
@@ -43,6 +42,21 @@ def random_route(cities):
     random.shuffle(route)
     return route
 
+# Greedy route.
+def greedy_route(cities, distance_matrix):
+    unvisited = set(cities)
+    start = random.choice(cities)
+    route = [start]
+    unvisited.remove(start)
+
+    while unvisited:
+        current = route[-1]
+        nearest = min(unvisited, key=lambda c: distance_matrix[(current, c)])
+        route.append(nearest)
+        unvisited.remove(nearest)
+
+    return route
+
 
 # Swap two nodes
 def swap(route):
@@ -63,6 +77,9 @@ def insertion(route):
 def segment_shuffle(route):
     new_route = route[:]
     i, j = sorted(random.sample(range(len(route)), 2))
+    # Ensure minimum segment size of at least 5 for meaningful shuffling
+    if j - i < 5:
+        j = min(i + random.randint(5, max(6, len(route) // 3)), len(route))
     segment = new_route[i:j]
     random.shuffle(segment)
     new_route[i:j] = segment
@@ -71,45 +88,45 @@ def segment_shuffle(route):
 def two_opt(route):
     new_route = route[:]
     i, j = sorted(random.sample(range(len(route)), 2))
-    if j - i < 2:
-        return new_route
-    new_route[i:j] = reversed(new_route[i:j])
+    if j - i < 4:
+        j = i + 4  # Ensure at least 2 cities are swapped
+    new_route[i:j] = list(reversed(new_route[i:j]))
     return new_route
 
-def adjacent_swap(route):
-    new_route = route[:]
-    i = random.randint(0, len(route)-2)
-    new_route[i], new_route[i+1] = (new_route[i+1], new_route[i])
-    return new_route
+# def adjacent_swap(route):
+#     new_route = route[:]
+#     i = random.randint(0, len(route)-1)
+#     next_i = (i + 1) % len(route)
+#     new_route[i], new_route[next_i] = (new_route[next_i], new_route[i])
+#     return new_route
 
-# Defeats the purpose of Random Gradient
-def two_opt_local_search(route):
-    best_route = route[:]
-    best_distance = route_distance(best_route)
-    improved = True
+# Not sure if this is acceptable. Has basically built in Random Gradient
+# def two_opt_local_search(route):
+#     best_route = route[:]
+#     best_distance = route_distance(best_route)
+#     improved = True
 
-    while improved:
-        improved = False
-        for i in range(len(route) - 1):
-            for j in range(i + 2, len(route)):
+#     while improved:
+#         improved = False
+#         for i in range(len(route) - 1):
+#             for j in range(i + 2, len(route)):
 
-                candidate = best_route[:]
-                candidate[i:j] = reversed(candidate[i:j])
-                candidate_distance = route_distance(candidate)
+#                 candidate = best_route[:]
+#                 candidate[i:j] = reversed(candidate[i:j])
+#                 candidate_distance = route_distance(candidate)
 
-                if candidate_distance < best_distance:
-                    best_route = candidate
-                    best_distance = candidate_distance
-                    improved = True
+#                 if candidate_distance < best_distance:
+#                     best_route = candidate
+#                     best_distance = candidate_distance
+#                     improved = True
 
-        route = best_route
-    return best_route
+#         route = best_route
+#     return best_route
 
 tsp_heuristics = [
     ("swap", swap),
     ("insertion", insertion),
     ("segment_shuffle", segment_shuffle),
-    ("adjacent swap", adjacent_swap),
     ("two opt", two_opt),]
 
 
@@ -124,8 +141,8 @@ def initialize_stats():
 
 
 def random_hyperheuristic(initial_solution, objective_fn, heuristics, iterations=25000):
-    # objective_fn(solution) -> float, always minimised.
-    # For maximisation problems (e.g. knapsack), pass a negated objective.
+    # minimises the objective function.
+    # For maximisation problems should use a negative function.
 
     current = initial_solution[:]
     current_cost = objective_fn(current)
@@ -178,7 +195,7 @@ def random_hyperheuristic(initial_solution, objective_fn, heuristics, iterations
 
 def random_gradient(initial_solution, objective_fn, heuristics, iterations=25000):
     # objective_fn(solution) is always minimised.
-    # For maximisation problems like knapsack, we should oprimise for a negative value.
+    # For maximisation problems like knapsack, use a negative objective.
 
     current = initial_solution[:]
     current_cost = objective_fn(current)
@@ -234,8 +251,7 @@ def random_gradient(initial_solution, objective_fn, heuristics, iterations=25000
 
 
 def random_permutation(initial_solution, objective_fn, heuristics, iterations=25000):
-    # At each step, applies heuristics in a freshly shuffled order (one per iteration).
-    # A new permutation is generated each time the previous one is exhausted.
+    # At each step, applies heuristics in a new shuffled order.
 
     current = initial_solution[:]
     current_cost = objective_fn(current)
@@ -291,12 +307,8 @@ def random_permutation(initial_solution, objective_fn, heuristics, iterations=25
             "heuristic_history": heuristic_history,
             "runtime": runtime}
 
-
+# Creates a random heuristic list, but keeps applying the current heuristic as long as it keeps improving.
 def permutation_gradient(initial_solution, objective_fn, heuristics, iterations=25000):
-    # Follows a shuffled permutation order, but keeps applying the current heuristic
-    # as long as it keeps improving. Only advances in the permutation on failure.
-    # A new permutation is generated once the current one is exhausted.
-
     current = initial_solution[:]
     current_cost = objective_fn(current)
     best = current[:]
@@ -318,7 +330,7 @@ def permutation_gradient(initial_solution, objective_fn, heuristics, iterations=
         candidate = heuristic(current)
         candidate_cost = objective_fn(candidate)
 
-        # Improvement found: stay with this heuristic
+        # Improvement found: keep heuristic
         if candidate_cost < current_cost:
 
             gain = current_cost - candidate_cost
@@ -330,7 +342,7 @@ def permutation_gradient(initial_solution, objective_fn, heuristics, iterations=
             if gain > heuristic_stats[heuristic_name]["best_single_gain"]:
                 heuristic_stats[heuristic_name]["best_single_gain"] = gain
 
-        # No improvement: advance to next in permutation
+        # No improvement
         else:
 
             perm_index += 1
@@ -355,9 +367,8 @@ def permutation_gradient(initial_solution, objective_fn, heuristics, iterations=
             "heuristic_history": heuristic_history,
             "runtime": runtime}
 
-
+# Each iteration applies all heuristics to the current solution and accepts the one that gives the best improvement.
 def greedy(initial_solution, objective_fn, heuristics, iterations=25000):
-    # Each iteration applies all heuristics to the current solution and accepts the one with the best.
     current = initial_solution[:]
     current_cost = objective_fn(current)
     best = current[:]
@@ -419,9 +430,7 @@ def greedy(initial_solution, objective_fn, heuristics, iterations=25000):
 
 
 def greedy_gradient(initial_solution, objective_fn, heuristics, iterations=25000):
-    # Runs a greedy round to find the best heuristic, then keeps applying it
-    # as long as it improves. When a full greedy round finds no improvement,
-    # a new greedy round is run to pick the next best heuristic.
+    # Runs a greedy round to find the best heuristic, then keeps applying it as long as it improves.
 
     current = initial_solution[:]
     current_cost = objective_fn(current)
@@ -552,93 +561,93 @@ def greedy_gradient(initial_solution, objective_fn, heuristics, iterations=25000
             "heuristic_history": heuristic_history,
             "runtime": runtime}
 
+if __name__ == "__main__":
+    all_results = []
 
-all_results = []
+    for dataset_name in DATASETS:
 
-for dataset_name in DATASETS:
+        print(f"Dataset: {dataset_name}")
+        problem, cities, distance_matrix = load_problem(dataset_name)
 
-    print(f"Dataset: {dataset_name}")
-    problem, cities, distance_matrix = load_problem(dataset_name)
+        # TSP objective: minimise total route distance
+        def tsp_objective(route):
+            return route_distance(route, distance_matrix)
 
-    # TSP objective: minimise total route distance
-    def tsp_objective(route):
-        return route_distance(route, distance_matrix)
+        algorithms = [
+            ("Random HH",            random_hyperheuristic),
+            ("RandomGradient HH",    random_gradient),
+            ("RandomPermutation HH", random_permutation),
+            ("PermutationGradient HH", permutation_gradient),
+            ("Greedy HH",            greedy),
+            ("GreedyGradient HH",    greedy_gradient),]
 
-    algorithms = [
-        ("Random HH",            random_hyperheuristic),
-        ("RandomGradient HH",    random_gradient),
-        ("RandomPermutation HH", random_permutation),
-        ("PermutationGradient HH", permutation_gradient),
-        ("Greedy HH",            greedy),
-        ("GreedyGradient HH",    greedy_gradient),
-    ]
+        all_run_results = {label: [] for label, _ in algorithms}
 
-    all_run_results = {label: [] for label, _ in algorithms}
+        # How the starting route is selected
+        initial = greedy_route(cities, distance_matrix)
+        # initial = random_route(cities)
 
-    for run in range(RUNS):
+        for run in range(RUNS):
 
-        print(f"Run {run + 1}/{RUNS}")
-
-        random.seed(SEED + run)
-        np.random.seed(SEED + run)
-        initial = random_route(cities)
-
-        for label, runner in algorithms:
+            print(f"Run {run + 1}/{RUNS}")
             random.seed(SEED + run)
             np.random.seed(SEED + run)
-            result = runner(initial, tsp_objective, tsp_heuristics, ITERATIONS)
-            all_run_results[label].append(result)
 
-    # --- Print summary stats for each algorithm ---
-    dataset_row = {"dataset": dataset_name}
+            for label, runner in algorithms:
+                random.seed(SEED + run)
+                np.random.seed(SEED + run)
+                result = runner(initial, tsp_objective, tsp_heuristics, ITERATIONS)
+                all_run_results[label].append(result)
 
-    for label, _ in algorithms:
-        costs = [r["best_cost"] for r in all_run_results[label]]
-        slug = label.lower().replace(" ", "_")
+        dataset_row = {"dataset": dataset_name}
 
-        print(f"\n{label}")
-        print("Average:", np.mean(costs))
-        print("Std:    ", np.std(costs))
-        print("Best:   ", np.min(costs))
+        for label, _ in algorithms:
+            costs = [r["best_cost"] for r in all_run_results[label]]
+            slug = label.lower().replace(" ", "_")
 
-        dataset_row[f"{slug}_avg"]  = np.mean(costs)
-        dataset_row[f"{slug}_std"]  = np.std(costs)
-        dataset_row[f"{slug}_best"] = np.min(costs)
+            print(f"\n{label}")
+            print("Average:", np.mean(costs))
+            print("Std:    ", np.std(costs))
+            print("Best:   ", np.min(costs))
 
-    all_results.append(dataset_row)
+            dataset_row[f"{slug}_avg"]  = np.mean(costs)
+            dataset_row[f"{slug}_std"]  = np.std(costs)
+            dataset_row[f"{slug}_best"] = np.min(costs)
 
-    plt.figure(figsize=(12, 6))
+        all_results.append(dataset_row)
 
-    for label, _ in algorithms:
-        best_result = min(all_run_results[label], key=lambda r: r["best_cost"])
-        plt.plot(best_result["history"], label=label)
+        plt.figure(figsize=(12, 6))
 
-    plt.xlabel("Iteration")
-    plt.ylabel("Best Distance")
-    plt.title(f"{dataset_name} — Convergence (best run per algorithm)")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(f"{dataset_name}_convergence.png", dpi=150, bbox_inches="tight")
-    plt.close()
+        for label, _ in algorithms:
+            best_result = min(all_run_results[label], key=lambda r: r["best_cost"])
+            plt.plot(best_result["history"], label=label)
 
-    for label, _ in algorithms:
+        plt.xlabel("Iteration")
+        plt.ylabel("Best Distance")
+        plt.title(f"{dataset_name} — Convergence (best run per algorithm)")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(f"{dataset_name}_convergence.png", dpi=150, bbox_inches="tight")
+        plt.close()
 
-        best_result = min(all_run_results[label], key=lambda r: r["best_cost"])
-        stats = best_result["heuristic_stats"]
-        print(f"\n--- {label} heuristic stats (best run) ---")
+        for label, _ in algorithms:
 
-        for heuristic_name, values in stats.items():
+            best_result = min(all_run_results[label], key=lambda r: r["best_cost"])
+            stats = best_result["heuristic_stats"]
+            print(f"\n--- {label} heuristic stats (best run) ---")
 
-            used = values["used"]
-            improvements = values["improvements"]
-            acceptance_rate = improvements / used if used > 0 else 0
-            print(f"\n  {heuristic_name}")
-            print("Used:", used)
-            print("Improvements:", improvements)
-            print("Acceptance rate:", round(acceptance_rate, 4))
-            print("Total gain:", round(values["total_gain"], 2))
-            print("Best single gain:", round(values["best_single_gain"], 2))
+            for heuristic_name, values in stats.items():
 
-results_df = pd.DataFrame(all_results)
-results_df.to_csv("results_summary.csv", index=False)
+                used = values["used"]
+                improvements = values["improvements"]
+                acceptance_rate = improvements / used if used > 0 else 0
+                print(f"\n  {heuristic_name}")
+                print("Used:", used)
+                print("Improvements:", improvements)
+                print("Acceptance rate:", round(acceptance_rate, 4))
+                print("Total gain:", round(values["total_gain"], 2))
+                print("Best single gain:", round(values["best_single_gain"], 2))
+
+    results_df = pd.DataFrame(all_results)
+    results_df.to_csv("results_summary.csv", index=False)
