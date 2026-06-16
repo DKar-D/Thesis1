@@ -4,18 +4,20 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import tsplib95
+import csv
 
 # Settings
 SEED = 13
-ITERATIONS = 25000
+ITERATIONS = 1000
 RUNS = 10
-DATASETS = [
-    "berlin52",
-    "kroA100"]
-
+# DATASETS = [
+#     "berlin52",
+#     "kroA100"]
+DATASETS = ["datasets/Delivery_Logistics.csv"]
+CAPACITY = 1000
 
 # Loads tsplib datasets. Will probably be deprecated later
-def load_problem(name):
+def load_problem_tsp(name):
     problem = tsplib95.load(f"datasets/{name}.tsp")
     cities = list(problem.get_nodes())
     distance_matrix = {
@@ -25,6 +27,17 @@ def load_problem(name):
 
     return problem, cities, distance_matrix
 
+def load_problem_knapsack(file_path):
+    mode_mapping = {"standard": 1, "two day": 2, "same day": 3, "express": 4}
+    df = pd.read_csv(file_path)
+    result = df[["package_weight_kg", "delivery_mode"]].copy()
+    result["delivery_mode"] = (result["delivery_mode"].astype(str).str.strip().str.lower().map(mode_mapping))
+    result = result.rename(columns={"package_weight_kg": "weight", "delivery_mode": "value"})
+    result["value"] = result["value"].astype(int)
+    result = result.head(300).reset_index(drop=True)
+    weights = result["weight"].to_numpy()
+    values = result["value"].to_numpy()
+    return weights, values
 
 # For calculating the distance
 def route_distance(route, distance_matrix):
@@ -33,8 +46,16 @@ def route_distance(route, distance_matrix):
         current_city = route[i]
         next_city = route[(i + 1) % len(route)]
         total += distance_matrix[(current_city, next_city)]
-
+    
     return total
+# Add penalty if infeasible
+def knapsack_value(solution, weights, values, capacity):
+    total_weight = sum(bit * weight for bit, weight in zip(solution, weights))
+    if total_weight > capacity:
+        return 0
+    
+    total_value = sum(bit * value for bit, value in zip(solution, values))
+    return total_value
 
 # Starting random route
 def random_route(cities):
@@ -57,6 +78,25 @@ def greedy_route(cities, distance_matrix):
 
     return route
 
+def knapsack_random_solution(weights, capacity):
+    """Generate a random feasible solution, not necessarily trying to fill capacity"""
+    n_items = len(weights)
+    solution = [0] * n_items
+    indices = list(range(n_items))
+    random.shuffle(indices)
+    current_weight = 0
+    
+    # Add items randomly until we have at least 1 item or can't add more
+    for idx in indices:
+        if current_weight + weights[idx] <= capacity:
+            solution[idx] = 1
+            current_weight += weights[idx]
+            # Stop after adding a random number of items (1-5) for more exploration
+            if random.random() < 0.3:  # 30% chance to stop early
+                break
+    print(solution)
+    print(current_weight)
+    return solution
 
 # Swap two nodes
 def swap(route):
@@ -99,15 +139,40 @@ tsp_heuristics = [
     ("segment_shuffle", segment_shuffle),
     ("two opt", two_opt),]
 
+def flip_k_bits(solution, k):
+    new_solution = solution.copy()
+    indices = random.sample(range(len(solution)), k)
+    for idx in indices:
+        new_solution[idx] = 1 - new_solution[idx]
+    return new_solution
+
+
+def one_bit_flip(solution):
+    return flip_k_bits(solution, 1)
+
+def two_bit_flip(solution):
+    return flip_k_bits(solution, 2)
+
+def three_bit_flip(solution):
+    return flip_k_bits(solution, 3)
+
+def four_bit_flip(solution):
+    return flip_k_bits(solution, 4)
+# Add something that has a chance to flip all bits. 1/prob
+knapsack_heuristics = [
+    ("one_bit_flip", one_bit_flip),
+    ("two_bit_flip", two_bit_flip),
+    ("three_bit_flip", three_bit_flip),
+    ("four_bit_flip", four_bit_flip),]
 
 # For keeping track of which heuristics were used
-def initialize_stats():
+def initialize_stats(heuristics = tsp_heuristics):
     return {name: {
             "used": 0,
             "improvements": 0,
             "total_gain": 0,
             "best_single_gain": 0}
-        for name, _ in tsp_heuristics}
+        for name, _ in heuristics}
 
 
 def random_hyperheuristic(initial_solution, objective_fn, heuristics, iterations=25000):
@@ -119,7 +184,7 @@ def random_hyperheuristic(initial_solution, objective_fn, heuristics, iterations
     best = current[:]
     best_cost = current_cost
     history = [best_cost]
-    heuristic_stats = initialize_stats()
+    heuristic_stats = initialize_stats(heuristics)
     heuristic_history = []
     start_time = time.time()
 
@@ -162,7 +227,6 @@ def random_hyperheuristic(initial_solution, objective_fn, heuristics, iterations
             "runtime": runtime}
 
 
-
 def random_gradient(initial_solution, objective_fn, heuristics, iterations=25000):
     # objective_fn(solution) is always minimised.
     # For maximisation problems like knapsack, use a negative objective.
@@ -174,7 +238,7 @@ def random_gradient(initial_solution, objective_fn, heuristics, iterations=25000
     best_cost = current_cost
 
     history = [best_cost]
-    heuristic_stats = initialize_stats()
+    heuristic_stats = initialize_stats(heuristics)
     heuristic_history = []
     heuristic_name, heuristic = random.choice(heuristics)
     start_time = time.time()
@@ -228,7 +292,7 @@ def random_permutation(initial_solution, objective_fn, heuristics, iterations=25
     best = current[:]
     best_cost = current_cost
     history = [best_cost]
-    heuristic_stats = initialize_stats()
+    heuristic_stats = initialize_stats(heuristics)
     heuristic_history = []
     start_time = time.time()
 
@@ -284,7 +348,7 @@ def permutation_gradient(initial_solution, objective_fn, heuristics, iterations=
     best = current[:]
     best_cost = current_cost
     history = [best_cost]
-    heuristic_stats = initialize_stats()
+    heuristic_stats = initialize_stats(heuristics)
     heuristic_history = []
     start_time = time.time()
 
@@ -344,7 +408,7 @@ def greedy(initial_solution, objective_fn, heuristics, iterations=25000):
     best = current[:]
     best_cost = current_cost
     history = [best_cost]
-    heuristic_stats = initialize_stats()
+    heuristic_stats = initialize_stats(heuristics)
     heuristic_history = []
     start_time = time.time()
     iteration = 0
@@ -407,7 +471,7 @@ def greedy_gradient(initial_solution, objective_fn, heuristics, iterations=25000
     best = current[:]
     best_cost = current_cost
     history = [best_cost]
-    heuristic_stats = initialize_stats()
+    heuristic_stats = initialize_stats(heuristics)
     heuristic_history = []
     start_time = time.time()
     iteration = 0
@@ -537,12 +601,6 @@ if __name__ == "__main__":
     for dataset_name in DATASETS:
 
         print(f"Dataset: {dataset_name}")
-        problem, cities, distance_matrix = load_problem(dataset_name)
-
-        # TSP objective: minimise total route distance
-        def tsp_objective(route):
-            return route_distance(route, distance_matrix)
-
         algorithms = [
             ("Random HH",            random_hyperheuristic),
             ("RandomGradient HH",    random_gradient),
@@ -553,20 +611,29 @@ if __name__ == "__main__":
 
         all_run_results = {label: [] for label, _ in algorithms}
 
-        # How the starting route is selected
-        initial = greedy_route(cities, distance_matrix)
+        # TSP settings.
+        # problem, cities, distance_matrix = load_problem(dataset_name)
+        # def tsp_objective(route):
+        #     return route_distance(route, distance_matrix)
         # initial = random_route(cities)
+        # objective = tsp_objective
+        # heuristics = tsp_heuristics
+
+        # Knapsack settings
+        weights, values = load_problem_knapsack(dataset_name)
+        def knapsack_objective(solution):
+            return -knapsack_value(solution, weights, values, CAPACITY)
+        initial = knapsack_random_solution(weights, CAPACITY)
+        objective = knapsack_objective
+        heuristics = knapsack_heuristics
 
         for run in range(RUNS):
-
             print(f"Run {run + 1}/{RUNS}")
-            random.seed(SEED + run)
-            np.random.seed(SEED + run)
 
             for label, runner in algorithms:
                 random.seed(SEED + run)
                 np.random.seed(SEED + run)
-                result = runner(initial, tsp_objective, tsp_heuristics, ITERATIONS)
+                result = runner(initial, objective, heuristics, ITERATIONS)
                 all_run_results[label].append(result)
 
         dataset_row = {"dataset": dataset_name}
@@ -593,7 +660,7 @@ if __name__ == "__main__":
             plt.plot(best_result["history"], label=label)
 
         plt.xlabel("Iteration")
-        plt.ylabel("Best Distance")
+        plt.ylabel("Best Value")
         plt.title(f"{dataset_name} — Convergence (best run per algorithm)")
         plt.legend()
         plt.grid(True)
