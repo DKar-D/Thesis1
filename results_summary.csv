@@ -1,2 +1,3 @@
-dataset,random_hh_avg,random_hh_std,random_hh_best,randomgradient_hh_avg,randomgradient_hh_std,randomgradient_hh_best,randompermutation_hh_avg,randompermutation_hh_std,randompermutation_hh_best,permutationgradient_hh_avg,permutationgradient_hh_std,permutationgradient_hh_best,greedy_hh_avg,greedy_hh_std,greedy_hh_best,greedygradient_hh_avg,greedygradient_hh_std,greedygradient_hh_best
-datasets/Delivery_Logistics.csv,-181.1,6.847627326307997,-190,-187.2,14.204224723651764,-209,-178.3,13.446560898608983,-203,-186.4,8.101851640211638,-208,-181.6,13.588230201170422,-196,-182.8,13.833293172632466,-208
+dataset,adaptive_rd_lr_avg,adaptive_rd_lr_std,adaptive_rd_lr_best
+500,963704.9,33270.71858992529,882002
+berlin52,8019.9,263.2227003888533,7542
